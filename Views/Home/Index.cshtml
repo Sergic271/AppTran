@@ -1,0 +1,405 @@
+@{
+    ViewData["Title"] = "Application Transfer";
+}
+
+<style>
+    #searchResults {
+        max-height: 400px;
+        overflow-y: auto;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .dropdown-header {
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        background-color: #f8f9fa;
+        width: 100%;
+    }
+
+    .dropdown-item {
+        white-space: normal;
+        padding: 0.4rem;
+        width: 100%;
+    }
+
+    .search-row {
+        display: grid;
+        grid-template-columns: 280px 200px 130px 200px;
+        gap: 6px;
+        align-items: start;
+        width: 100%;
+    }
+
+    .search-col {
+        padding: 0 4px;
+        font-size: 0.7rem;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        position: relative;
+    }
+
+    .tooltip {
+        position: relative;
+        display: inline-block;
+    }
+
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            background-color: black;
+            color: white;
+            text-align: center;
+            padding: 5px;
+            border-radius: 6px;
+            position: absolute;
+            z-index: 1;
+            width: max-content;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+
+    .dropdown-header .search-col {
+        font-weight: bold;
+        font-size: 0.75rem;
+    }
+
+    .invalid-number {
+        border-bottom: 2px dashed red !important;
+        padding-bottom: 2px;
+    }
+
+    #applicationNumber {
+        font-family: inherit;
+        font-size: inherit;
+        line-height: inherit;
+    }
+
+    .form-group {
+        position: relative;
+    }
+
+    .validation-overlay {
+        position: absolute;
+        pointer-events: none;
+        z-index: 1;
+    }
+</style>
+
+<div class="container d-flex align-items-center justify-content-center min-vh-100">
+    <div class="col-md-9">
+        <div class="form-group mb-3">
+            <label for="applicationNumber">Application numbers</label>
+            <input type="text" id="applicationNumber" class="form-control"
+                   placeholder="Enter application numbers separated by spaces" />
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="transferTo">Whom to transfer</label>
+            <input type="text" id="transferTo" class="form-control" autocomplete="off" />
+            <div id="searchResults" class="dropdown-menu w-100">
+            </div>
+        </div>
+
+        <div class="text-center">
+            <button id="submitButton" class="btn btn-primary">Submit</button>
+        </div>
+    </div>
+</div>
+
+
+@section Scripts {
+    
+    <script type="text/javascript">
+        jQuery(function ($) {
+            var lastValue = '';
+            var searchTimeout;
+            var currentRequest;
+            var currentYear = new Date().getFullYear();
+
+            function isValidNumber(num) {
+                if (!num) return true;
+                if (num.length > 10) return false;
+                if (num.length === 1 && num !== '2') return false;
+                if (num.length >= 2 && !num.startsWith('20')) return false;
+
+                var currentYearStr = currentYear.toString();
+
+                if (num.length >= 3) {
+                    var thirdDigit = parseInt(num[2]);
+                    var currentThirdDigit = parseInt(currentYearStr[2]);
+                    if (thirdDigit > currentThirdDigit) return false;
+                }
+
+                if (num.length >= 4) {
+                    var yearPart = parseInt(num.substring(0, 4));
+                    if (yearPart > currentYear) return false;
+                }
+
+                if (num.length >= 5) {
+                    var fifthDigit = num[4];
+                    if (!['1', '5', '7', '8'].includes(fifthDigit)) return false;
+                }
+
+                return true;
+            }
+
+            function hasDuplicate(numbers, newNumber) {
+                return numbers.indexOf(newNumber) !== numbers.lastIndexOf(newNumber);
+            }
+
+            function markNumberAsInvalid(number) {
+                console.log('markNumberAsInvalid called with:', number);
+                var input = $('#applicationNumber');
+                var currentValue = input.val();
+
+                $('.validation-overlay').remove();
+
+                var tempDiv = $('<div>').addClass('validation-overlay');
+                var parts = currentValue.split(' ');
+                var html = parts.map(part =>
+                    part === number ?
+                        `<span class="invalid-number">${part}</span>` :
+                        part
+                ).join(' ');
+
+                tempDiv
+                    .html(html)
+                    .css({
+                        'position': 'absolute',
+                        'left': '0',
+                        'top': '0',
+                        'width': input.outerWidth(),
+                        'height': input.outerHeight(),
+                        'padding': input.css('padding'),
+                        'font-size': input.css('font-size'),
+                        'font-family': input.css('font-family'),
+                        'line-height': input.css('line-height'),
+                        'background': 'transparent',
+                        'pointer-events': 'none'
+                    });
+
+                input.parent()
+                    .css('position', 'relative')
+                    .append(tempDiv);
+            }
+
+            $('#applicationNumber').on('keypress', function (e) {
+                var char = String.fromCharCode(e.which);
+                var currentValue = this.value;
+                var numbers = currentValue.split(' ');
+                var currentNumber = numbers[numbers.length - 1] || '';
+
+                if (!/[\d\s]/.test(char)) {
+                    e.preventDefault();
+                    return;
+                }
+
+                if (char === ' ') {
+                    if (!currentValue || currentValue.endsWith(' ')) {
+                        e.preventDefault();
+                        return;
+                    }
+
+                    if (currentNumber.length === 10) {
+                        console.log('Checking number:', currentNumber);
+
+                        $.get('/Home/CheckRegNumber', { number: currentNumber })
+                            .done(function (exists) {
+                                console.log('Database check result:', exists);
+                                if (!exists) {
+                                    markNumberAsInvalid(currentNumber);
+                                }
+                            })
+                            .fail(function (error) {
+                                console.error('Database check failed:', error);
+                            });
+                    }
+
+                    else {
+                        e.preventDefault();
+                    }
+                    return;
+                }
+
+                if (/\d/.test(char)) {
+                    if (!currentNumber) {
+                        if (char !== '2') {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                    else if (currentNumber.length === 1) {
+                        if (char !== '0') {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                    else if (currentNumber.length === 2) {
+                        var currentYearThirdDigit = parseInt(currentYear.toString()[2]);
+                        if (parseInt(char) > currentYearThirdDigit) {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                    else if (currentNumber.length === 3) {
+                        var potentialYear = parseInt(currentNumber + char);
+                        if (potentialYear > currentYear) {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                    else if (currentNumber.length === 4) {
+                        if (!['1', '5', '7', '8'].includes(char)) {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                    else if (currentNumber.length >= 10) {
+                        e.preventDefault();
+                        return;
+                    }
+                }
+             });
+                $('#applicationNumber').on('input', function () {
+                var currentValue = this.value;
+                var numbers = currentValue.split(' ');
+                var currentNumber = numbers[numbers.length - 1];
+
+                if (currentNumber && currentNumber.length === 10) {
+                    $.get('/Home/CheckRegNumber', { number: currentNumber })
+                        .done(function (exists) {
+                            if (!exists) {
+                                $('.validation-overlay').remove();
+                                markNumberAsInvalid(currentNumber);
+                            }
+                        });
+                }
+            });
+
+            $('#applicationNumber').on('paste', function (e) {
+                e.preventDefault();
+                var pastedText = (e.originalEvent.clipboardData || window.clipboardData).getData('text');
+
+                var numbers = pastedText.replace(/[^\d\s]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .split(' ');
+
+                var existingNumbers = $(this).val().split(' ').filter(n => n);
+                var validNumbers = numbers.filter(num => {
+                    if (num.length !== 10 || !num.startsWith('20')) return false;
+                    if (hasDuplicate(existingNumbers.concat(validNumbers), num)) return false;
+
+                    var yearPart = parseInt(num.substring(0, 4));
+                    if (yearPart > currentYear) return false;
+
+                    var currentYearThirdDigit = parseInt(currentYear.toString()[2]);
+                    if (parseInt(num[2]) > currentYearThirdDigit) return false;
+
+                    if (!['1', '5', '7', '8'].includes(num[4])) return false;
+
+                    return true;
+                });
+                var currentVal = $(this).val();
+                var newVal = validNumbers.join(' ');
+
+                if (currentVal) {
+                    if (validNumbers.length > 0) {
+                        newVal = currentVal + (currentVal.endsWith(' ') ? '' : ' ') + newVal;
+                    } else {
+                        newVal = currentVal;
+                    }
+                }
+
+                $(this).val(newVal);
+
+                validNumbers.forEach(number => {
+                    console.log('Checking pasted number:', number);
+                    $.get('/Home/CheckRegNumber', { number: number })
+                        .done(function (exists) {
+                            console.log('Database check result:', exists);
+                            if (!exists) {
+                                markNumberAsInvalid(number);
+                            }
+                        })
+                        .fail(function (error) {
+                            console.error('Database check failed:', error);
+                        });
+                });
+
+
+                $('#transferTo').on('input', function () {
+                    console.log('Search text:', searchText);
+                    clearTimeout(searchTimeout);
+
+                    if (currentRequest && currentRequest.state() === 'pending') {
+                        currentRequest.abort();
+                    }
+
+                    var searchText = $(this).val();
+
+                    searchTimeout = setTimeout(function () {
+                        if (searchText.length > 0) {
+                            currentRequest = $.get('/Home/SearchApplicants', { searchText: searchText })
+                                .done(function (result) {
+                                    var resultHtml = `
+                               <div class="dropdown-header p-2">
+                                   <div class="search-row">
+                                       <div class="search-col"><strong>Name</strong></div>
+                                       <div class="search-col"><strong>Mail</strong></div>
+                                       <div class="search-col"><strong>OGRN</strong></div>
+                                       <div class="search-col"><strong>Status</strong></div>
+                                   </div>
+                               </div>`;
+
+                                    if (result && result.length > 0) {
+                                        result.forEach(function (item) {
+                                            resultHtml += `
+                                       <a class="dropdown-item" href="#">
+                                           <div class="search-row">
+                                               <div class="search-col" title="${item.name}">${item.name}</div>
+                                               <div class="search-col" title="${item.mail}">${item.mail}</div>
+                                               <div class="search-col tooltip">
+                                                   ${item.ogrn ? item.ogrn : 'No'}
+                                                   <span class="tooltiptext">${item.company ? item.company : 'Person'}</span>
+                                               </div>
+                                               <div class="search-col" title="${item.certificateStatus}">
+                                                   ${item.certificateStatus || ''}
+                                               </div>
+                                           </div>
+                                       </a>`;
+                                        });
+                                    } else {
+                                        resultHtml += `
+                                   <div class="dropdown-item">
+                                       No results found
+                                   </div>`;
+                                    }
+
+                                    $('#searchResults').html(resultHtml).show();
+                                });
+                        } else {
+                            $('#searchResults').hide();
+                        }
+                    }, 300);
+                });
+
+                $(document).on('click', function (e) {
+                    if (!$(e.target).closest('.form-group').length) {
+                        $('#searchResults').hide();
+                    }
+                });
+            });
+    </script>
+});

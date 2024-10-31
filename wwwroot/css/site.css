@@ -1,0 +1,37 @@
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}
+
+#searchResults {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.dropdown-header {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.dropdown-item {
+    white-space: normal;
+}
+
+.text-truncate {
+    max-width: 100%;
+}
